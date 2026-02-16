@@ -47,7 +47,6 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [joined, setJoined] = useState(false);
-  const [isHost, setIsHost] = useState(false);
 
   const [query, setQuery] = useState("trending songs");
   const [searchLoading, setSearchLoading] = useState(false);
@@ -194,13 +193,8 @@ export default function App() {
         setStatus(message || "Join failed");
       });
 
-      socketRef.current.on("action-error", ({ message }) => {
-        setStatus(message || "Action failed");
-      });
-
-      socketRef.current.on("room-state", ({ roomCode: incomingCode, isHost: hostFlag, videoId, isPlaying, currentTime, serverNow, chat }) => {
+      socketRef.current.on("room-state", ({ roomCode: incomingCode, videoId, isPlaying, currentTime, serverNow, chat }) => {
         if (incomingCode) setRoomCode(incomingCode);
-        setIsHost(Boolean(hostFlag));
         const player = playerRef.current;
         if (!player) return;
 
@@ -219,27 +213,6 @@ export default function App() {
         setMessages((chat || []).map((m) => ({ ...m, kind: "chat" })));
         setStatus("Joined room");
         setJoined(true);
-      });
-
-      socketRef.current.on("room-owner-changed", ({ ownerSocketId }) => {
-        const myId = socketRef.current?.id;
-        setIsHost(Boolean(myId && ownerSocketId && myId === ownerSocketId));
-      });
-
-      socketRef.current.on("room-exited", () => {
-        setJoined(false);
-        setIsHost(false);
-        setRoomCode("");
-        setMessages([]);
-        setStatus("You exited the room");
-      });
-
-      socketRef.current.on("room-terminated", ({ by }) => {
-        setJoined(false);
-        setIsHost(false);
-        setRoomCode("");
-        setMessages([]);
-        setStatus(by ? `Room terminated by ${by}` : "Room terminated");
       });
 
       socketRef.current.on("video-changed", ({ videoId, by }) => {
@@ -431,16 +404,6 @@ export default function App() {
     setChatInput("");
   }
 
-  function exitRoom() {
-    if (!joined || !socketRef.current) return;
-    socketRef.current.emit("exit-room");
-  }
-
-  function terminateRoom() {
-    if (!joined || !socketRef.current) return;
-    socketRef.current.emit("terminate-room");
-  }
-
   function scrollToPage(page) {
     const el = layoutRef.current;
     if (!el || !isMobileViewport) return;
@@ -522,20 +485,6 @@ export default function App() {
         <div className="room-actions">
           <button onClick={createRoom}>Create Room</button>
         </div>
-        {joined ? (
-          <div className="room-secondary-actions">
-            <button type="button" className="secondary-btn" onClick={exitRoom}>Exit Room</button>
-            <button
-              type="button"
-              className="danger-btn"
-              onClick={terminateRoom}
-              disabled={!isHost}
-              title={isHost ? "Terminate room for all users" : "Only host can terminate room"}
-            >
-              Terminate Room
-            </button>
-          </div>
-        ) : null}
 
         <label>Join with room code</label>
         <input
