@@ -184,6 +184,25 @@ button:disabled {
   letter-spacing: 4px;
 }
 
+.room-secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.room-secondary-actions button {
+  margin: 0;
+}
+
+.secondary-btn {
+  background: linear-gradient(145deg, #3a5cd7, #2a3faa);
+}
+
+.danger-btn {
+  background: linear-gradient(145deg, #f25467, #b12f45);
+}
+
 .status {
   font-size: 12px;
   color: #c9d4f0;
@@ -546,6 +565,11 @@ button:disabled {
 
   .search-box {
     grid-template-columns: 1fr 98px;
+  }
+
+  .room-secondary-actions {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .player-wrap #yt-player {
