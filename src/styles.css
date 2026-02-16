@@ -509,14 +509,17 @@ button:disabled {
   }
 
   .layout {
-    min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
-    gap: 0;
-    padding: 20px;
+    gap: 14px;
+    padding: 72px 16px 20px;
     overflow-x: auto;
     overflow-y: hidden;
     scroll-snap-type: x mandatory;
     scroll-behavior: smooth;
+    scroll-padding-inline: 16px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
   .layout::-webkit-scrollbar {
@@ -524,11 +527,15 @@ button:disabled {
   }
 
   .panel {
-    min-width: calc(100vw - 40px);
-    min-height: calc(100vh - 40px);
-    border-radius: 16px;
+    min-width: calc(100vw - 32px);
+    min-height: calc(100dvh - 96px);
+    border-radius: 18px;
     scroll-snap-align: start;
-    padding: 64px 14px 16px;
+    padding: 18px 16px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
   }
 
   .room-panel,
@@ -538,24 +545,34 @@ button:disabled {
   }
 
   .search-box {
-    grid-template-columns: 1fr 102px;
+    grid-template-columns: 1fr 98px;
   }
 
   .player-wrap #yt-player {
     aspect-ratio: 16 / 9;
-    min-height: 230px;
+    min-height: 220px;
   }
 
   .kpi-row {
     grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .video-grid {
-    max-height: 240px;
+    max-height: 34vh;
+  }
+
+  .chat-panel {
+    min-height: calc(100dvh - 96px);
   }
 
   .chat-list {
-    max-height: 55vh;
-    min-height: 50vh;
+    flex: 1;
+    max-height: none;
+    min-height: 40vh;
+  }
+
+  .chat-form {
+    margin-top: 10px;
   }
 }

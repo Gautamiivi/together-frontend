@@ -93,17 +93,32 @@ export default function App() {
     const el = layoutRef.current;
     if (!el || !isMobileViewport) return;
 
-    const onScroll = () => {
-      const page = Math.max(0, Math.min(2, Math.round(el.scrollLeft / Math.max(el.clientWidth, 1))));
-      if (page === activePageRef.current) return;
+    let rafId = 0;
+    const getPagePitch = () => {
+      const firstPanel = el.querySelector(".panel");
+      if (!firstPanel) return el.clientWidth;
+      const styles = window.getComputedStyle(el);
+      const gapValue = parseFloat(styles.columnGap || styles.gap || "0") || 0;
+      return firstPanel.getBoundingClientRect().width + gapValue;
+    };
 
-      activePageRef.current = page;
-      setActivePage(page);
-      triggerHaptic([10]);
+    const onScroll = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const pitch = Math.max(getPagePitch(), 1);
+        const page = Math.max(0, Math.min(2, Math.round(el.scrollLeft / pitch)));
+        if (page === activePageRef.current) return;
+        activePageRef.current = page;
+        setActivePage(page);
+        triggerHaptic([16]);
+      });
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      el.removeEventListener("scroll", onScroll);
+    };
   }, [isMobileViewport]);
 
   useEffect(() => {
@@ -390,8 +405,13 @@ export default function App() {
   function scrollToPage(page) {
     const el = layoutRef.current;
     if (!el || !isMobileViewport) return;
+    const firstPanel = el.querySelector(".panel");
+    const styles = window.getComputedStyle(el);
+    const gapValue = parseFloat(styles.columnGap || styles.gap || "0") || 0;
+    const pitch = firstPanel ? firstPanel.getBoundingClientRect().width + gapValue : el.clientWidth;
+    triggerHaptic([14]);
     el.scrollTo({
-      left: page * el.clientWidth,
+      left: page * pitch,
       behavior: "smooth",
     });
   }
