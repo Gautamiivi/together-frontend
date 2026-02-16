@@ -8,6 +8,11 @@ const DEFAULT_VIDEO = {
   channelTitle: "Together",
   thumbnail: "",
 };
+const SYNC_BUFFER_SECONDS = 0.25;
+const PLAY_DRIFT_THRESHOLD = 1.0;
+const PAUSE_DRIFT_THRESHOLD = 0.35;
+const SEEK_JUMP_THRESHOLD = 1.2;
+const SEEK_EMIT_COOLDOWN_MS = 900;
 
 function toVideoObject(item) {
   return {
@@ -59,6 +64,8 @@ export default function App() {
   const socketRef = useRef(null);
   const suppressRef = useRef(false);
   const lastStateRef = useRef(-1);
+  const lastSampleRef = useRef({ time: 0, at: 0, state: -1 });
+  const lastSeekEmitRef = useRef(0);
   const layoutRef = useRef(null);
   const activePageRef = useRef(0);
 
@@ -139,21 +146,38 @@ export default function App() {
     playerRef.current?.loadVideoById(currentVideo.videoId, 0);
   }, [ready, currentVideo.videoId, playerRef]);
 
-  useEffect(() => {
-    if (!ready || !joined || !socketRef.current || !playerRef.current || !window.YT) return;
+  function applyRemoteSync(payload, options = {}) {
+    const player = playerRef.current;
+    if (!player || !window.YT) return;
 
-    const onTick = setInterval(() => {
-      const player = playerRef.current;
-      const socket = socketRef.current;
-      if (!player || !socket || suppressRef.current) return;
+    const { forceSeek = false } = options;
+    const isPlaying = Boolean(payload?.isPlaying);
+    const baseTime = Number(payload?.currentTime) || 0;
+    const serverNow = Number(payload?.serverNow) || 0;
+    const transitSeconds = serverNow > 0 ? Math.max(0, (Date.now() - serverNow) / 1000) : 0;
+    const targetTime = Math.max(0, baseTime + (isPlaying ? transitSeconds + SYNC_BUFFER_SECONDS : 0));
 
-      const state = player.getPlayerState();
-      if (state !== window.YT.PlayerState.PLAYING && state !== window.YT.PlayerState.PAUSED) return;
-      socket.emit("sync-seek", { currentTime: player.getCurrentTime() });
-    }, 5000);
+    const localTime = Number(player.getCurrentTime?.() || 0);
+    const localState = player.getPlayerState?.();
+    const drift = Math.abs(localTime - targetTime);
+    const threshold = isPlaying ? PLAY_DRIFT_THRESHOLD : PAUSE_DRIFT_THRESHOLD;
+    const shouldSeek = forceSeek ? drift > 0.2 : drift > threshold;
 
-    return () => clearInterval(onTick);
-  }, [ready, joined, playerRef]);
+    suppressRef.current = true;
+    if (shouldSeek) player.seekTo(targetTime, true);
+    if (isPlaying && localState !== window.YT.PlayerState.PLAYING) player.playVideo();
+    if (!isPlaying && localState === window.YT.PlayerState.PLAYING) player.pauseVideo();
+
+    lastSampleRef.current = {
+      time: targetTime,
+      at: Date.now(),
+      state: isPlaying ? window.YT.PlayerState.PLAYING : window.YT.PlayerState.PAUSED,
+    };
+
+    setTimeout(() => {
+      suppressRef.current = false;
+    }, 350);
+  }
 
   function connectSocket() {
     if (!socketRef.current) {
@@ -169,7 +193,7 @@ export default function App() {
         setStatus(message || "Join failed");
       });
 
-      socketRef.current.on("room-state", ({ roomCode: incomingCode, videoId, isPlaying, currentTime, chat }) => {
+      socketRef.current.on("room-state", ({ roomCode: incomingCode, videoId, isPlaying, currentTime, serverNow, chat }) => {
         if (incomingCode) setRoomCode(incomingCode);
         const player = playerRef.current;
         if (!player) return;
@@ -182,15 +206,9 @@ export default function App() {
           player.loadVideoById(videoId, 0);
         }
 
-        suppressRef.current = true;
         setTimeout(() => {
-          player.seekTo(currentTime || 0, true);
-          if (isPlaying) player.playVideo();
-          else player.pauseVideo();
+          applyRemoteSync({ isPlaying, currentTime, serverNow }, { forceSeek: true });
         }, 200);
-        setTimeout(() => {
-          suppressRef.current = false;
-        }, 700);
 
         setMessages((chat || []).map((m) => ({ ...m, kind: "chat" })));
         setStatus("Joined room");
@@ -220,36 +238,20 @@ export default function App() {
         ]);
       });
 
-      socketRef.current.on("sync-play", ({ currentTime }) => {
-        const player = playerRef.current;
-        if (!player) return;
-        suppressRef.current = true;
-        player.seekTo(currentTime || 0, true);
-        player.playVideo();
-        setTimeout(() => {
-          suppressRef.current = false;
-        }, 400);
+      socketRef.current.on("sync-play", ({ isPlaying, currentTime, serverNow }) => {
+        applyRemoteSync({ isPlaying, currentTime, serverNow }, { forceSeek: true });
       });
 
-      socketRef.current.on("sync-pause", ({ currentTime }) => {
-        const player = playerRef.current;
-        if (!player) return;
-        suppressRef.current = true;
-        player.seekTo(currentTime || 0, true);
-        player.pauseVideo();
-        setTimeout(() => {
-          suppressRef.current = false;
-        }, 400);
+      socketRef.current.on("sync-pause", ({ isPlaying, currentTime, serverNow }) => {
+        applyRemoteSync({ isPlaying, currentTime, serverNow }, { forceSeek: true });
       });
 
-      socketRef.current.on("sync-seek", ({ currentTime }) => {
-        const player = playerRef.current;
-        if (!player) return;
-        suppressRef.current = true;
-        player.seekTo(currentTime || 0, true);
-        setTimeout(() => {
-          suppressRef.current = false;
-        }, 200);
+      socketRef.current.on("sync-seek", ({ isPlaying, currentTime, serverNow }) => {
+        applyRemoteSync({ isPlaying, currentTime, serverNow }, { forceSeek: true });
+      });
+
+      socketRef.current.on("sync-state", ({ isPlaying, currentTime, serverNow }) => {
+        applyRemoteSync({ isPlaying, currentTime, serverNow });
       });
 
       socketRef.current.on("chat-message", (message) => {
@@ -419,14 +421,32 @@ export default function App() {
   function handlePlayerStateChange() {
     if (!joined || !ready || !socketRef.current || !playerRef.current || !window.YT || suppressRef.current) return;
 
-    const state = playerRef.current.getPlayerState();
+    const player = playerRef.current;
+    const state = player.getPlayerState();
+    const now = Date.now();
+    const currentTime = Number(player.getCurrentTime() || 0);
+
+    if (state === window.YT.PlayerState.PLAYING || state === window.YT.PlayerState.PAUSED) {
+      const prev = lastSampleRef.current;
+      if (prev.at > 0 && (prev.state === window.YT.PlayerState.PLAYING || prev.state === window.YT.PlayerState.PAUSED)) {
+        const elapsed = (now - prev.at) / 1000;
+        const expected = prev.time + (prev.state === window.YT.PlayerState.PLAYING ? elapsed : 0);
+        const jump = Math.abs(currentTime - expected);
+        if (jump > SEEK_JUMP_THRESHOLD && now - lastSeekEmitRef.current > SEEK_EMIT_COOLDOWN_MS) {
+          lastSeekEmitRef.current = now;
+          socketRef.current.emit("sync-seek", { currentTime });
+        }
+      }
+      lastSampleRef.current = { time: currentTime, at: now, state };
+    }
+
     if (state === lastStateRef.current) return;
     lastStateRef.current = state;
 
     if (state === window.YT.PlayerState.PLAYING) {
-      socketRef.current.emit("sync-play", { currentTime: playerRef.current.getCurrentTime() });
+      socketRef.current.emit("sync-play", { currentTime });
     } else if (state === window.YT.PlayerState.PAUSED) {
-      socketRef.current.emit("sync-pause", { currentTime: playerRef.current.getCurrentTime() });
+      socketRef.current.emit("sync-pause", { currentTime });
     }
   }
 
